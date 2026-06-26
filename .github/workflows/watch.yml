@@ -4,53 +4,68 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+  push:
+  pull_request:
 
 permissions:
   contents: write
 
 concurrency:
-  group: ticket-watcher
+  group: ticket-watcher-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
   test:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+            .python-version
 
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        run: uv sync --all-groups --frozen
 
       - name: Run tests
         run: uv run pytest
 
   watch:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    needs: test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+            .python-version
+
+      - name: Set up Python
+        run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-groups --frozen
+
+      - name: Run tests
+        run: uv run pytest
 
       - name: Run watcher
         env:
@@ -62,14 +77,14 @@ jobs:
         run: |
           git config user.name "ticket-watcher-bot"
           git config user.email "ticket-watcher-bot@users.noreply.github.com"
-          
+
           if [ ! -f seen_reageer_links.json ]; then
             echo "No seen_reageer_links.json file created."
             exit 0
           fi
-          
+
           git add seen_reageer_links.json
-          
+
           if git diff --cached --quiet; then
             echo "No state changes."
           else
