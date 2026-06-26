@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ticket-availability-watcher"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "requests>=2.32.5",
+]
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "responses>=0.26.1",
+]
+
+[project.scripts]
+ticket-watcher = "ticket_watcher.watcher:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ticket_watcher"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
