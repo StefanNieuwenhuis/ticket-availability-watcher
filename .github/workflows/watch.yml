@@ -62,11 +62,17 @@ jobs:
         run: |
           git config user.name "ticket-watcher-bot"
           git config user.email "ticket-watcher-bot@users.noreply.github.com"
-
-          if git diff --quiet seen_reageer_links.json; then
+          
+          if [ ! -f seen_reageer_links.json ]; then
+            echo "No seen_reageer_links.json file created."
+            exit 0
+          fi
+          
+          git add seen_reageer_links.json
+          
+          if git diff --cached --quiet; then
             echo "No state changes."
           else
-            git add seen_reageer_links.json
             git commit -m "Update seen ticket links"
             git push
           fi
