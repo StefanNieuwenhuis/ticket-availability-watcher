@@ -3,7 +3,11 @@ from urllib.parse import urlparse, parse_qs
 
 from utils.helpers import clean_text, normalize_for_match
 
-PRICE_PATTERN = re.compile(r"€\s?\d+(?:[,.]\d{2})?")
+PRICE_PATTERN = re.compile(
+    r"(?:€\s?\d+(?:[,.]\d{2})?|\d+(?:[,.]\d{2})?\s?€|EUR\s?\d+(?:[,.]\d{2})?)",
+    flags=re.IGNORECASE,
+)
+
 
 
 KNOWN_EVENT_TYPES = [
@@ -25,9 +29,29 @@ def remove_reageer(value: str) -> str:
     return clean_text(value.lower().replace("reageer", ""))
 
 
+def normalize_price(price: str) -> str:
+    price = clean_text(price)
+
+    if price.upper().startswith("EUR"):
+        amount = clean_text(price[3:])
+        return f"€ {amount}"
+
+    if price.endswith("€"):
+        amount = clean_text(price[:-1])
+        return f"€ {amount}"
+
+    if price.startswith("€") and not price.startswith("€ "):
+        return f"€ {clean_text(price[1:])}"
+
+    return price
+
 def extract_price(context: str) -> str | None:
     match = PRICE_PATTERN.search(context)
-    return clean_text(match.group(0)) if match else None
+
+    if not match:
+        return None
+
+    return normalize_price(match.group(0))
 
 
 def extract_event_type(context: str) -> str | None:

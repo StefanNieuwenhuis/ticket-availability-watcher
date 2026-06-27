@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
+    "python-dotenv>=1.2.2",
     "requests>=2.32.5",
 ]
 [dependency-groups]
@@ -19,7 +20,7 @@ dev = [
 ]
 
 [project.scripts]
-ticket-watcher = "ticket_watcher.watcher:main"
+ticket-watcher = "ticket_watcher.ticket_watcher:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ticket_watcher"]
