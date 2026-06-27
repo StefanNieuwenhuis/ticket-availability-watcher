@@ -25,11 +25,6 @@ EVENT_URL = os.environ.get(
     'https://platform.inschrijven.nl/2026092751189',
 )
 
-NAME = "Stefan Nieuwenhuis"
-EMAIL = "your@email.com"
-PHONE_NO = "0641384477"
-
-
 @dataclass
 class Listing:
     id: str
@@ -134,45 +129,46 @@ def get_new_listings(seen_listings: list[Listing], current_listings: list[Listin
     return new_listings, removed_listings
 
 
-def format_telegram_message(listing: Listing) -> str:
+def format_telegram_message(listing: Listing, submitted: bool) -> str:
+    status = "✅ Form auto-submitted!" if submitted else "⚠️ Auto-submit failed, reply manually"
+
     return "".join([
         "🎟️ New ticket available!\n\n",
         f"🏃 {listing.listing_type}\n",
         f"👤 {listing.seller}\n",
         f"💶 €{listing.price}\n",
+        f"{status}\n",
     ])
 
 
-def send_telegram_notification(new_listings: list[Listing]) -> None:
+def send_telegram_notification(listing: Listing, submitted: bool) -> None:
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_BOT_CHAT_ID")
 
     if not bot_token or not chat_id:
         logger.warning("Telegram secrets not configured, printing to stdout instead")
-        for listing in new_listings:
-            print(listing)
+        print(listing)
         return
 
-    for listing in new_listings:
-        message = format_telegram_message(listing)
-        logger.info("Sending Telegram notification for listing: %s", listing.id)
+    message = format_telegram_message(listing, submitted)
+    logger.info("Sending Telegram notification for listing: %s", listing.id)
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": 'HTML',
-                "reply_markup": {
-                    "inline_keyboard": [[
-                        {"text": "📯 Reply to seller", "url": listing.url},
-                    ]]
-                }
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        logger.info("Notification sent for listing: %s", listing.id)
+    response = requests.post(
+        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": 'HTML',
+            "reply_markup": {
+                "inline_keyboard": [[
+                    {"text": "📯 Reply to seller", "url": listing.url},
+                ]]
+            }
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    logger.info("Notification sent for listing: %s", listing.id)
 
 
 def save_seen_listings(listings: list[Listing]) -> None:
@@ -183,6 +179,37 @@ def save_seen_listings(listings: list[Listing]) -> None:
     except OSError as e:
         logger.error("Failed to save seen listings: %s", e)
 
+
+def submit_reply_form(listing_id: str, listing_url: str) -> bool:
+    try:
+        name = os.environ.get('NAME')
+        email = os.environ.get('EMAIL')
+        phone_no = os.environ.get('PHONE_NO')
+
+        response = requests.post(
+            listing_url,
+            data={
+                "actie": "opslaan",
+                "naam": name,
+                "emai": email,
+                "telf": phone_no,
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        error = soup.find('div', class_='fouthint')
+
+        if error:
+            logger.warning("Form rejected for listing %s: %s", listing_id, error.get_text().strip())
+            return False
+
+        logger.info("Form submitted for listing: %s", listing_id)
+        return True
+    except requests.RequestException as e:
+        logger.error("Failed to submit form for listing %s: %s", listing_id, e)
+        return False
 
 def main():
     logger.info("Starting to look for new ticket listings")
@@ -198,7 +225,15 @@ def main():
     if removed_listings:
         logger.info("%d listing(s) removed from page", len(removed_listings))
 
-    send_telegram_notification(new_listings)
+    for listing in new_listings:
+        submitted = submit_reply_form(listing.id, listing.url)
+        if submitted:
+            logger.info("Auto-submitted form for: %s", listing)
+        else:
+            logger.warning("Auto-submit failed for: %s", listing)
+
+        send_telegram_notification(listing, submitted)
+
     save_seen_listings(current_listings)
     logger.info("Done")
 

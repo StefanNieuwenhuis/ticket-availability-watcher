@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from urllib.parse import parse_qs
 
 import pytest
 import requests
@@ -21,7 +22,7 @@ HTML_HAPPY_PATH = """
 								<td colspan="2"><b style="font-size:14pt">1/8e Marathon - Den Hoorn • € 20,00</b></td>
 							</tr>
 							<tr>
-								<td style="vertical-align:top">Stefan<br><i></i></td>
+								<td style="vertical-align:top">Test User<br><i></i></td>
 								<td style="text-align:right"><a href="?koop=abc123" class="btn">Reageer</a></td>
 							</tr>
 						</tbody>
@@ -70,7 +71,7 @@ HTML_INVALID_LISTING = """
 						<td colspan="2"><b>1/8e Marathon - Den Hoorn</b></td>
 					</tr>
 					<tr>
-						<td>Stefan</td>
+						<td>Test User</td>
 					</tr>
 					<tr>
 						<td><a class="btn" href="?koop=abc123">Reageer</a></td>
@@ -98,7 +99,7 @@ class TestLoadSeenListings:
 			{
 				"id": "abc123",
 				"listing_type": "1/8e Marathon - Den Hoorn",
-				"seller": "Stefan",
+				"seller": "Test User",
 				"price": "20.00",
 				"url": "https://example.test/event?koop=abc123",
 			}
@@ -112,7 +113,7 @@ class TestLoadSeenListings:
 		assert isinstance(seen[0], ticket_watcher.Listing)
 		assert seen[0].id == "abc123"
 		assert seen[0].listing_type == "1/8e Marathon - Den Hoorn"
-		assert seen[0].seller == "Stefan"
+		assert seen[0].seller == "Test User"
 		assert seen[0].price == Decimal("20.00")
 		assert seen[0].url == "https://example.test/event?koop=abc123"
 
@@ -145,7 +146,7 @@ class TestFetchListings:
 		assert isinstance(listings[0], ticket_watcher.Listing)
 		assert listings[0].id == "abc123"
 		assert listings[0].listing_type == "1/8e Marathon - Den Hoorn"
-		assert listings[0].seller == "Stefan"
+		assert listings[0].seller == "Test User"
 		assert listings[0].price == Decimal("20.00")
 		assert listings[0].url == "https://example.test/event?koop=abc123"
 
@@ -297,12 +298,13 @@ class TestFormatTelegramMessage:
 			url="https://example.test/event?koop=abc123",
 		)
 
-		message = ticket_watcher.format_telegram_message(listing)
+		message = ticket_watcher.format_telegram_message(listing, submitted=True)
 
 		assert "New ticket available!" in message
 		assert "Halve Marathon - Bootstart" in message
 		assert "Ellen Hoekstra" in message
 		assert "€45.00" in message
+		assert "Form auto-submitted" in message
 
 	def test_keeps_expected_line_structure(self):
 		listing = ticket_watcher.Listing(
@@ -313,10 +315,11 @@ class TestFormatTelegramMessage:
 			url="https://example.test/event?koop=abc123",
 		)
 
-		message = ticket_watcher.format_telegram_message(listing)
+		message = ticket_watcher.format_telegram_message(listing, submitted=False)
 
 		assert message.startswith("🎟️ New ticket available!\n\n")
 		assert message.endswith("\n")
+		assert "Auto-submit failed" in message
 
 
 class TestSendTelegramNotification:
@@ -342,12 +345,13 @@ class TestSendTelegramNotification:
 			status=200,
 		)
 
-		ticket_watcher.send_telegram_notification([self._listing("abc123")])
+		ticket_watcher.send_telegram_notification(self._listing("abc123"), submitted=True)
 
 		assert len(responses.calls) == 1
 		payload = json.loads(responses.calls[0].request.body)
 		assert payload["chat_id"] == "123456"
 		assert "New ticket available!" in payload["text"]
+		assert "Form auto-submitted" in payload["text"]
 		assert payload["reply_markup"]["inline_keyboard"][0][0]["url"] == "https://example.test/event?koop=abc123"
 
 	@responses.activate
@@ -368,19 +372,17 @@ class TestSendTelegramNotification:
 			status=200,
 		)
 
-		ticket_watcher.send_telegram_notification([
-			self._listing("abc123"),
-			self._listing("def456"),
-		])
+		ticket_watcher.send_telegram_notification(self._listing("abc123"), submitted=True)
+		ticket_watcher.send_telegram_notification(self._listing("def456"), submitted=False)
 
 		assert len(responses.calls) == 2
 
 	@responses.activate
-	def test_with_no_new_listings_makes_no_requests(self, monkeypatch):
-		monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
-		monkeypatch.setenv("TELEGRAM_BOT_CHAT_ID", "123456")
+	def test_with_missing_credentials_makes_no_requests(self, monkeypatch):
+		monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+		monkeypatch.delenv("TELEGRAM_BOT_CHAT_ID", raising=False)
 
-		ticket_watcher.send_telegram_notification([])
+		ticket_watcher.send_telegram_notification(self._listing("abc123"), submitted=True)
 
 		assert len(responses.calls) == 0
 
@@ -389,7 +391,7 @@ class TestSendTelegramNotification:
 		monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
 		monkeypatch.delenv("TELEGRAM_BOT_CHAT_ID", raising=False)
 
-		ticket_watcher.send_telegram_notification([self._listing("abc123")])
+		ticket_watcher.send_telegram_notification(self._listing("abc123"), submitted=False)
 
 		captured = capsys.readouterr()
 		assert "Halve Marathon - Bootstart" in captured.out
@@ -446,4 +448,81 @@ class TestSaveSeenListings:
 		ticket_watcher.save_seen_listings([self._listing("abc123")])
 
 		assert "Failed to save seen listings: disk full" in caplog.text
+
+
+class TestSubmitReplyForm:
+	@responses.activate
+	def test_happy_path_posts_form_and_returns_true(self, monkeypatch):
+		listing_id = "abc123"
+		listing_url = "https://example.test/reply?koop=abc123"
+
+		monkeypatch.setenv("NAME", "Test User")
+		monkeypatch.setenv("EMAIL", "test@example.test")
+		monkeypatch.setenv("PHONE_NO", "0600000000")
+
+		responses.add(
+			responses.POST,
+			listing_url,
+			status=200,
+		)
+
+		result = ticket_watcher.submit_reply_form(listing_id, listing_url)
+
+		assert result is True
+		assert len(responses.calls) == 1
+
+		payload = responses.calls[0].request.body
+		if isinstance(payload, bytes):
+			payload = payload.decode("utf-8")
+		form = parse_qs(payload)
+		assert form["actie"] == ["opslaan"]
+		assert form["naam"] == ["Test User"]
+		assert form["emai"] == ["test@example.test"]
+		assert form["telf"] == ["0600000000"]
+
+	@responses.activate
+	def test_returns_false_when_server_responds_with_http_error(self):
+		listing_id = "abc123"
+		listing_url = "https://example.test/reply?koop=abc123"
+
+		responses.add(
+			responses.POST,
+			listing_url,
+			status=500,
+		)
+
+		result = ticket_watcher.submit_reply_form(listing_id, listing_url)
+
+		assert result is False
+
+	@responses.activate
+	def test_returns_false_when_request_raises_exception(self):
+		listing_id = "abc123"
+		listing_url = "https://example.test/reply?koop=abc123"
+
+		responses.add(
+			responses.POST,
+			listing_url,
+			body=requests.ConnectionError("network down"),
+		)
+
+		result = ticket_watcher.submit_reply_form(listing_id, listing_url)
+
+		assert result is False
+
+	@responses.activate
+	def test_returns_false_when_response_contains_form_error(self):
+		listing_id = "abc123"
+		listing_url = "https://example.test/reply?koop=abc123"
+
+		responses.add(
+			responses.POST,
+			listing_url,
+			body="<html><div class='fouthint'>Niet toegestaan</div></html>",
+			status=200,
+		)
+
+		result = ticket_watcher.submit_reply_form(listing_id, listing_url)
+
+		assert result is False
 
