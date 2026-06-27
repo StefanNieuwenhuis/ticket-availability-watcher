@@ -321,6 +321,20 @@ class TestFormatTelegramMessage:
 		assert message.endswith("\n")
 		assert "Auto-submit failed" in message
 
+	def test_includes_submitted_success_status_when_true(self):
+		listing = ticket_watcher.Listing(
+			id="abc123",
+			listing_type="10K",
+			seller="Alice",
+			price=Decimal("25.00"),
+			url="https://example.test/event?koop=abc123",
+		)
+
+		message = ticket_watcher.format_telegram_message(listing, submitted=True)
+
+		assert "Form auto-submitted" in message
+		assert "Auto-submit failed" not in message
+
 
 class TestSendTelegramNotification:
 	@staticmethod
@@ -376,6 +390,10 @@ class TestSendTelegramNotification:
 		ticket_watcher.send_telegram_notification(self._listing("def456"), submitted=False)
 
 		assert len(responses.calls) == 2
+		first_payload = json.loads(responses.calls[0].request.body)
+		second_payload = json.loads(responses.calls[1].request.body)
+		assert "Form auto-submitted" in first_payload["text"]
+		assert "Auto-submit failed" in second_payload["text"]
 
 	@responses.activate
 	def test_with_missing_credentials_makes_no_requests(self, monkeypatch):

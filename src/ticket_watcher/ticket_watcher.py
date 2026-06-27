@@ -25,6 +25,8 @@ EVENT_URL = os.environ.get(
     'https://platform.inschrijven.nl/2026092751189',
 )
 
+LISTING_TYPE_FILTER = "Halve Marathon - Bootstart"
+
 @dataclass
 class Listing:
     id: str
@@ -129,8 +131,13 @@ def get_new_listings(seen_listings: list[Listing], current_listings: list[Listin
     return new_listings, removed_listings
 
 
-def format_telegram_message(listing: Listing, submitted: bool) -> str:
-    status = "✅ Form auto-submitted!" if submitted else "⚠️ Auto-submit failed, reply manually"
+def format_telegram_message(listing: Listing, submitted: bool | None) -> str:
+    if submitted is None:
+        status = "⏭️ Auto-submit skipped (wrong type)"
+    elif submitted:
+        status = "✅ Form auto-submitted!"
+    else:
+        status = "⚠️ Auto-submit failed, reply manually"
 
     return "".join([
         "🎟️ New ticket available!\n\n",
@@ -141,7 +148,7 @@ def format_telegram_message(listing: Listing, submitted: bool) -> str:
     ])
 
 
-def send_telegram_notification(listing: Listing, submitted: bool) -> None:
+def send_telegram_notification(listing: Listing, submitted: bool | None) -> None:
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_BOT_CHAT_ID")
 
@@ -211,6 +218,20 @@ def submit_reply_form(listing_id: str, listing_url: str) -> bool:
         logger.error("Failed to submit form for listing %s: %s", listing_id, e)
         return False
 
+def auto_submit_reply_form(listing: Listing) -> bool | None:
+    if listing.listing_type != LISTING_TYPE_FILTER:
+        logger.info("Skipping auto-submit for listing type: %s", listing.listing_type)
+        return None
+
+    submitted = submit_reply_form(listing.id, listing.url)
+
+    if submitted:
+        logger.info("Auto-submitted form for: %s", listing)
+    else:
+        logger.warning("Auto-submit failed for: %s", listing)
+
+    return submitted
+
 def main():
     logger.info("Starting to look for new ticket listings")
     seen_listings = load_seen_listings()
@@ -226,12 +247,7 @@ def main():
         logger.info("%d listing(s) removed from page", len(removed_listings))
 
     for listing in new_listings:
-        submitted = submit_reply_form(listing.id, listing.url)
-        if submitted:
-            logger.info("Auto-submitted form for: %s", listing)
-        else:
-            logger.warning("Auto-submit failed for: %s", listing)
-
+        submitted = auto_submit_reply_form(listing)
         send_telegram_notification(listing, submitted)
 
     save_seen_listings(current_listings)
