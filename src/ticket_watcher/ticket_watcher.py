@@ -10,6 +10,8 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+from email_confirmer.email_confirmer import wait_and_confirm
+
 load_dotenv()
 
 logging.basicConfig(
@@ -248,6 +250,7 @@ def auto_submit_reply_form(listing: Listing) -> bool | None:
 
     if submitted:
         logger.info("Auto-submitted form for: %s", listing)
+        wait_and_confirm()
     else:
         logger.warning("Auto-submit failed for: %s", listing)
 

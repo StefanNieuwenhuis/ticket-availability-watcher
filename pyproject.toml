@@ -22,9 +22,10 @@ dev = [
 
 [project.scripts]
 ticket-watcher = "ticket_watcher.ticket_watcher:main"
+email-confirmer = "email_confirmer.email_confirmer:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ticket_watcher"]
+packages = ["src/ticket_watcher", "src/email_confirmer"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
