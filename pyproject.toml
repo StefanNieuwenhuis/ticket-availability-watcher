@@ -21,6 +21,7 @@ dev = [
 ]
 
 [project.scripts]
+migrate = "utils.migrations:main"
 ticket-watcher = "ticket_watcher.ticket_watcher:main"
 email-confirmer = "email_confirmer.email_confirmer:main"
 
